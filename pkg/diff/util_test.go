@@ -15,6 +15,7 @@ package diff
 
 import (
 	"github.com/pingcap/check"
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/tidb/pkg/meta/model"
 	"github.com/pingcap/tidb/pkg/parser"
 	pmodel "github.com/pingcap/tidb/pkg/parser/ast"
@@ -75,7 +76,7 @@ func (s *testUtilSuite) TestRowContainsCols(c *check.C) {
 	c.Assert(contain, check.Equals, false)
 }
 
-func (s *testUtilSuite) TestRowToString(c *check.C) {
+func (s *testUtilSuite) TestRedactRowToString(c *check.C) {
 	row := make(map[string]*dbutil.ColumnData)
 	row["id"] = &dbutil.ColumnData{
 		Data:   []byte("1"),
@@ -92,10 +93,27 @@ func (s *testUtilSuite) TestRowToString(c *check.C) {
 		IsNull: true,
 	}
 
-	rowStr := rowToString(row)
+	// With default redaction mode (OFF), values should be visible
+	rowStr := redactRowToString(row)
 	c.Assert(rowStr, check.Matches, ".*id: 1.*")
 	c.Assert(rowStr, check.Matches, ".*name: abc.*")
 	c.Assert(rowStr, check.Matches, ".*info: IsNull.*")
+
+	// Test ON mode - values should be replaced with "?"
+	perrors.RedactLogEnabled.Store(perrors.RedactLogEnable)
+	rowStr = redactRowToString(row)
+	c.Assert(rowStr, check.Matches, `.*id: \?.*`)
+	c.Assert(rowStr, check.Matches, `.*name: \?.*`)
+	c.Assert(rowStr, check.Matches, ".*info: IsNull.*") // IsNull is not redacted
+	perrors.RedactLogEnabled.Store(perrors.RedactLogDisable)
+
+	// Test MARKER mode - values should be wrapped with markers
+	perrors.RedactLogEnabled.Store(perrors.RedactLogMarker)
+	rowStr = redactRowToString(row)
+	c.Assert(rowStr, check.Matches, ".*id: ‹1›.*")
+	c.Assert(rowStr, check.Matches, ".*name: ‹abc›.*")
+	c.Assert(rowStr, check.Matches, ".*info: IsNull.*") // IsNull is not redacted
+	perrors.RedactLogEnabled.Store(perrors.RedactLogDisable)
 }
 
 func (s *testUtilSuite) TestMinLenInSlices(c *check.C) {
